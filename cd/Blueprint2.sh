@@ -141,7 +141,7 @@ echo -e "${Y}Panel breathe kar raha hai… theme lagao, flex maro 😏${N}"
 
 # Function: Reinstall (Rerun Only)
 reinstall_nobita() {
-    print_header "REINSTALLING NOBITA HOSTING"
+    print_header "REINSTALLING DHARM HOSTING"
     print_status "Starting reinstallation"
     blueprint -rerun-install > /dev/null 2>&1 &
     animate_progress $! "Reinstalling"
@@ -150,7 +150,7 @@ reinstall_nobita() {
 
 # Function: Update Nobita Hosting
 update_nobita() {
-    print_header "UPDATING NOBITA HOSTING"
+    print_header "UPDATING DHARM HOSTING"
     print_status "Starting update"
     blueprint -upgrade > /dev/null 2>&1 &
     animate_progress $! "Updating"
@@ -162,7 +162,7 @@ show_menu() {
     clear
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}           🔧 BLUEPRINT INSTALLER               ${NC}"
-    echo -e "${CYAN}              Nobita Hosting                   ${NC}"
+    echo -e "${CYAN}              Dharm Hosting                   ${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e ""
     echo -e "${WHITE}╔═══════════════════════════════════════════════╗${NC}"
@@ -170,7 +170,7 @@ show_menu() {
     echo -e "${WHITE}╠═══════════════════════════════════════════════╣${NC}"
     echo -e "${WHITE}║   ${GREEN}1)${NC} ${CYAN}Fresh Install${NC}                         ${WHITE}║${NC}"
     echo -e "${WHITE}║   ${GREEN}2)${NC} ${CYAN}Reinstall (Rerun Only)${NC}                ${WHITE}║${NC}"
-    echo -e "${WHITE}║   ${GREEN}3)${NC} ${CYAN}Update Nobita Hosting${NC}                 ${WHITE}║${NC}"
+    echo -e "${WHITE}║   ${GREEN}3)${NC} ${CYAN}Update Dharm Hosting${NC}                 ${WHITE}║${NC}"
     echo -e "${WHITE}║   ${GREEN}0)${NC} ${RED}Exit${NC}                               ${WHITE}║${NC}"
     echo -e "${WHITE}╚═══════════════════════════════════════════════╝${NC}"
     echo -e ""
