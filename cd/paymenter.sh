@@ -1,117 +1,181 @@
 #!/bin/bash
+set -e
 
-# Function to install SSL using Certbot
+### VARIABLES
+PHP_VERSION="8.3"
+APP_DIR="/var/www/paymenter"
+NGINX_CONF="/etc/nginx/sites-available/paymenter.conf"
+
+### FUNCTIONS
 install_ssl() {
-    echo "Installing Certbot and configuring SSL for $1..."
+    echo "🔐 Installing SSL for $1"
     apt -y install certbot python3-certbot-nginx
-    certbot --nginx -d $1
-    echo "SSL configured successfully."
+    certbot --nginx -d "$1" \
+      --non-interactive \
+      --agree-tos \
+      -m admin@"$1" \
+      --redirect || true
 }
 
-# Prompt for database password
-read -p "Enter the database password for Paymenter: " DB_PASSWORD
+### INPUTS
+read -p "🌐 Enter domain name (example.com): " DOMAIN
+read -s -p "🔑 Enter DB password for Paymenter: " DB_PASSWORD
+echo
 
-# Setup database
-mysql -e "SELECT 1 FROM mysql.db WHERE Db='paymenter'" > /dev/null 2>&1
-if [ $? -eq 0 ]; then
-    read -p "The database 'paymenter' already exists. Do you want to delete and recreate it? (Y/N): " recreate_db_choice
-    if [ "$recreate_db_choice" = "Y" ] || [ "$recreate_db_choice" = "y" ]; then
-        mysql -e "DROP DATABASE IF EXISTS paymenter;"
-        mysql -e "CREATE DATABASE paymenter;"
-    else
-        echo "Skipping database creation."
-    fi
-else
-    mysql -e "CREATE DATABASE paymenter;"
+### SYSTEM UPDATE
+apt update && apt upgrade -y
+
+### DEPENDENCIES
+apt install -y software-properties-common curl apt-transport-https ca-certificates gnupg unzip git redis-server
+
+### PHP
+add-apt-repository -y ppa:ondrej/php
+apt update
+apt install -y \
+php$PHP_VERSION php$PHP_VERSION-{cli,fpm,common,gd,mysql,mbstring,bcmath,xml,curl,zip}
+
+### MARIADB
+curl -sS https://downloads.mariadb.com/MariaDB/mariadb_repo_setup | bash -s -- --mariadb-server-version="mariadb-10.11"
+apt update
+apt install -y mariadb-server
+
+### NGINX
+apt install -y nginx
+
+### COMPOSER
+if ! command -v composer &>/dev/null; then
+  curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 fi
 
-mysql -e "CREATE USER IF NOT EXISTS 'paymenter'@'127.0.0.1' IDENTIFIED BY '$DB_PASSWORD';"
-mysql -e "GRANT ALL PRIVILEGES ON paymenter.* TO 'paymenter'@'127.0.0.1' WITH GRANT OPTION;"
+### DATABASE SETUP
+DB_EXISTS=$(mysql -N -s -e "SHOW DATABASES LIKE 'paymenter';")
+if [ "$DB_EXISTS" = "paymenter" ]; then
+  read -p "⚠️ Database exists. Recreate? (y/N): " DB_RE
+  if [[ "$DB_RE" =~ ^[Yy]$ ]]; then
+    mysql -e "DROP DATABASE paymenter;"
+    mysql -e "CREATE DATABASE paymenter;"
+  fi
+else
+  mysql -e "CREATE DATABASE paymenter;"
+fi
 
-# Install dependencies
-apt -y install software-properties-common curl apt-transport-https ca-certificates gnupg
-LC_ALL=C.UTF-8 add-apt-repository -y ppa:ondrej/php
-curl -sS https://downloads.mariadb.com/MariaDB/mariadb_repo_setup | sudo bash -s -- --mariadb-server-version="mariadb-10.11"
-apt update
-apt -y install php8.3 php8.3-{common,cli,gd,mysql,mbstring,bcmath,xml,fpm,curl,zip} mariadb-server nginx tar unzip git redis-server
+mysql -e "CREATE USER IF NOT EXISTS 'paymenter'@'localhost' IDENTIFIED BY '$DB_PASSWORD';"
+mysql -e "GRANT ALL PRIVILEGES ON paymenter.* TO 'paymenter'@'localhost';"
+mysql -e "FLUSH PRIVILEGES;"
 
-# Install Composer
-curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
-
-# Download Paymenter
-mkdir /var/www/paymenter
-cd /var/www/paymenter
+### DOWNLOAD PAYMENTER
+rm -rf $APP_DIR
+mkdir -p $APP_DIR
+cd $APP_DIR
 curl -Lo paymenter.tar.gz https://github.com/paymenter/paymenter/releases/latest/download/paymenter.tar.gz
-tar -xzvf paymenter.tar.gz
-chmod -R 755 storage/* bootstrap/cache/
+tar -xzf paymenter.tar.gz
+rm paymenter.tar.gz
 
-# Configure Nginx
-read -p "Enter your domain name or IP address: " domain
-cat <<EOF > /etc/nginx/sites-available/paymenter.conf
+### PERMISSIONS
+chown -R www-data:www-data $APP_DIR
+chmod -R 755 storage bootstrap/cache
+
+### ENV SETUP
+cp .env.example .env
+
+sed -i "s/^APP_ENV=.*/APP_ENV=production/" .env
+sed -i "s/^APP_DEBUG=.*/APP_DEBUG=false/" .env
+sed -i "s/^APP_URL=.*/APP_URL=https:\/\/$DOMAIN/" .env
+
+sed -i "s/^DB_DATABASE=.*/DB_DATABASE=paymenter/" .env
+sed -i "s/^DB_USERNAME=.*/DB_USERNAME=paymenter/" .env
+sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
+
+sed -i "s/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=redis/" .env
+sed -i "s/^CACHE_DRIVER=.*/CACHE_DRIVER=redis/" .env
+sed -i "s/^SESSION_DRIVER=.*/SESSION_DRIVER=redis/" .env
+
+### INSTALL APP
+composer install --no-dev --optimize-autoloader
+php artisan key:generate --force
+php artisan storage:link
+
+### MIGRATE
+php artisan migrate --force --seed
+
+### PHP LIMITS
+cat <<EOF > /etc/php/$PHP_VERSION/fpm/conf.d/99-paymenter.ini
+upload_max_filesize=64M
+post_max_size=64M
+memory_limit=512M
+max_execution_time=300
+EOF
+
+systemctl restart php$PHP_VERSION-fpm
+
+### NGINX CONFIG (CLOUDFLARE SAFE)
+cat <<EOF > $NGINX_CONF
 server {
     listen 80;
     listen [::]:80;
-    server_name $domain;
-    root /var/www/paymenter/public;
+    server_name $DOMAIN;
+    root $APP_DIR/public;
+
     index index.php;
+
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-Content-Type-Options "nosniff";
+    add_header Referrer-Policy "strict-origin";
+
     location / {
         try_files \$uri \$uri/ /index.php?\$query_string;
     }
-    location ~ \.php$ {
+
+    location ~ \.php\$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/var/run/php/php8.3-fpm.sock;
+        fastcgi_pass unix:/run/php/php$PHP_VERSION-fpm.sock;
+    }
+
+    location ~ /\. {
+        deny all;
     }
 }
 EOF
 
-ln -s /etc/nginx/sites-available/paymenter.conf /etc/nginx/sites-enabled/
-systemctl restart nginx
+rm -f /etc/nginx/sites-enabled/default
+rm -f /etc/nginx/sites-enabled/paymenter.conf
+ln -s $NGINX_CONF /etc/nginx/sites-enabled/paymenter.conf
 
-# Ask user if they want SSL
-read -p "Do you want to install SSL for your domain? (Y/N): " ssl_choice
+nginx -t && systemctl reload nginx
 
-if [ "$ssl_choice" = "Y" ] || [ "$ssl_choice" = "y" ]; then
-    install_ssl $domain
+### SSL
+read -p "🔐 Install SSL now? (y/N): " SSL_YES
+if [[ "$SSL_YES" =~ ^[Yy]$ ]]; then
+  install_ssl "$DOMAIN"
 fi
 
-# Configure Paymenter
-cp .env.example .env
-composer install --no-dev --optimize-autoloader
-php artisan key:generate --force
-php artisan storage:link
-echo "DB_DATABASE=paymenter" >> .env
-echo "DB_USERNAME=paymenter" >> .env
-echo "DB_PASSWORD=$DB_PASSWORD" >> .env
+### CRON (WWW-DATA)
+(crontab -u www-data -l 2>/dev/null; echo "* * * * * php $APP_DIR/artisan schedule:run >> /dev/null 2>&1") | crontab -u www-data -
 
-# Run migrations
-php artisan migrate --force --seed
-
-# Set permissions
-chown -R www-data:www-data /var/www/paymenter/*
-
-# Configure cronjob
-echo "* * * * * php /var/www/paymenter/artisan schedule:run >> /dev/null 2>&1" | crontab -
-
-# Create queue worker
+### QUEUE WORKER
 cat <<EOF > /etc/systemd/system/paymenter.service
 [Unit]
 Description=Paymenter Queue Worker
+After=network.target redis-server.service
+
 [Service]
 User=www-data
 Group=www-data
 Restart=always
-ExecStart=/usr/bin/php /var/www/paymenter/artisan queue:work
-StartLimitInterval=180
-StartLimitBurst=30
-RestartSec=5s
+ExecStart=/usr/bin/php $APP_DIR/artisan queue:work --sleep=3 --tries=3
+RestartSec=5
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
-systemctl enable --now paymenter.service
+systemctl daemon-reload
+systemctl enable --now paymenter
 
-#Create First User
-cd /var/www/paymenter
+### FINAL USER
 php artisan p:user:create
 
-echo "Paymenter installation complete."
+echo
+echo "✅ PAYMENTER INSTALLATION COMPLETE"
+echo "🌐 https://$DOMAIN"
+echo "⚡ Optimized for Pterodactyl & Cloudflare"
