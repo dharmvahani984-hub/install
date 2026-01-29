@@ -32,7 +32,7 @@ apt install -y software-properties-common curl apt-transport-https ca-certificat
 add-apt-repository -y ppa:ondrej/php
 apt update
 apt install -y \
-php$PHP_VERSION php$PHP_VERSION-{cli,fpm,common,gd,mysql,mbstring,bcmath,xml,curl,zip}
+php$PHP_VERSION php$PHP_VERSION-{cli,fpm,common,gd,mysql,mbstring,bcmath,xml,curl,zip,intl}
 
 ### MARIADB
 curl -sS https://downloads.mariadb.com/MariaDB/mariadb_repo_setup | bash -s -- --mariadb-server-version="mariadb-10.11"
