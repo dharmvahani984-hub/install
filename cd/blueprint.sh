@@ -18,7 +18,7 @@ install_nobita() {
 
     # --- Step 2: Install Yarn, Dependencies & Nobita Hosting Release ---
     npm i -g yarn
-    cd /var/www/pterodactyl
+    cd /www/wwwroot/panel.test.obsidianhosting.in
     yarn
     sudo apt install -y zip unzip git curl wget
 
