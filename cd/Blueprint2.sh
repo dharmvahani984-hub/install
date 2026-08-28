@@ -83,7 +83,7 @@ welcome_animation() {
 # Function: Install (Fresh Setup)
 install_nobita() {
 # ================= VARIABLES =================
-export PTERODACTYL_DIRECTORY=/www/wwwroot/panel.test.obsidianhosting.in
+export PTERODACTYL_DIRECTORY=/www/wwwroot/panel.obsidianhosting.in
 
 # ================= START =================
 header
